@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.16;
+
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -21,6 +22,8 @@ contract GotasNFTMarketplace is Ownable, ReentrancyGuard, Pausable {
     address public royaltyAddress;
     address public platformFeeAddress;
 
+    mapping(address => bool) public isWhitelisted;
+
     mapping(uint256 => Listing) public listings;
 
     uint256 public nextListingId = 1;
@@ -35,6 +38,17 @@ contract GotasNFTMarketplace is Ownable, ReentrancyGuard, Pausable {
         platformFeePercentage = _platformFeePercentage;
         royaltyAddress = _royaltyAddress;
         platformFeeAddress = _platformFeeAddress;
+
+        isWhitelisted[_royaltyAddress] = true;
+        isWhitelisted[_platformFeeAddress] = true;
+    }
+
+    function addToWhitelist(address _address) external onlyOwner {
+        isWhitelisted[_address] = true;
+    }
+
+    function removeFromWhitelist(address _address) external onlyOwner {
+        isWhitelisted[_address] = false;
     }
 
     function listNFT(address _nftContractAddress, uint256 _nftId, uint256 _price, uint256 _deadline) external whenNotPaused nonReentrant {
@@ -58,57 +72,53 @@ contract GotasNFTMarketplace is Ownable, ReentrancyGuard, Pausable {
         nextListingId++;
     }
 
-  function buyNFT(uint256 _listingId) external payable whenNotPaused nonReentrant {
-    require(msg.value > 0, "Sent value must be greater than zero.");
+    function buyNFT(uint256 _listingId) external payable whenNotPaused nonReentrant {
+        require(msg.value > 0, "Sent value must be greater than zero.");
 
-    Listing storage listing = listings[_listingId];
-    require(listing.seller != address(0), "Listing does not exist.");
-    require(block.timestamp <= listing.deadline, "This listing has expired.");
-    require(msg.value == listing.price, "Sent value must be equal to the listing price.");
+        Listing storage listing = listings[_listingId];
+        require(listing.seller != address(0), "Listing does not exist.");
+        require(block.timestamp <= listing.deadline, "This listing has expired.");
+        require(msg.value == listing.price, "Sent value must be equal to the listing price.");
 
-    // Verifique se os endereços de taxa são válidos
-    require(royaltyAddress != address(0) && platformFeeAddress != address(0), "Invalid fee addresses");
+        require(isWhitelisted[royaltyAddress], "Royalty address is not whitelisted");
+        require(isWhitelisted[platformFeeAddress], "Platform fee address is not whitelisted");
 
-    uint256 royaltyAmount = royaltyPercentage / 10000 * listing.price;
-    uint256 platformFee = platformFeePercentage / 10000 * listing.price;
-    uint256 sellerAmount = listing.price - royaltyAmount - platformFee;
+        uint256 royaltyAmount = royaltyPercentage / 10000 * listing.price;
+        uint256 platformFee = platformFeePercentage / 10000 * listing.price;
+        uint256 sellerAmount = listing.price - royaltyAmount - platformFee;
 
-    address seller = listing.seller;
+        address seller = listing.seller;
 
-    IERC721 nftContract = IERC721(listing.nftContractAddress);
-    require(nftContract.ownerOf(listing.nftId) == seller, "Seller no longer owns the NFT.");
+        IERC721 nftContract = IERC721(listing.nftContractAddress);
+        require(nftContract.ownerOf(listing.nftId) == seller, "Seller no longer owns the NFT.");
 
-    nftContract.safeTransferFrom(seller, msg.sender, listing.nftId);
+        nftContract.safeTransferFrom(seller, msg.sender, listing.nftId);
 
-    // Transfira os fundos
-    payable(seller).transfer(sellerAmount);
+        payable(seller).transfer(sellerAmount);
+        payable(royaltyAddress).transfer(royaltyAmount);
+        payable(platformFeeAddress).transfer(platformFee);
 
-    // Adicione suas verificações adicionais aqui se necessário
-    payable(royaltyAddress).transfer(royaltyAmount);
-    payable(platformFeeAddress).transfer(platformFee);
+        emit NFTSold(_listingId, listing.seller, msg.sender, listing.price);
 
-    emit NFTSold(_listingId, listing.seller, msg.sender, listing.price);
+        delete listings[_listingId];
+    }
 
-    delete listings[_listingId];
+    function pause() external onlyOwner nonReentrant {
+        _pause();
+    }
+
+    function unpause() external onlyOwner nonReentrant {
+        _unpause();
+    }
+
+    function updateFeeAddresses(address _newRoyaltyAddress, address _newPlatformFeeAddress) external onlyOwner nonReentrant {
+        require(_newRoyaltyAddress != address(0) && _newPlatformFeeAddress != address(0), "Addresses cannot be zero");
+        royaltyAddress = _newRoyaltyAddress;
+        platformFeeAddress = _newPlatformFeeAddress;
+    }
+
+    function updateFeePercentages(uint256 _newRoyaltyPercentage, uint256 _newPlatformFeePercentage) external onlyOwner nonReentrant {
+        royaltyPercentage = _newRoyaltyPercentage;
+        platformFeePercentage = _newPlatformFeePercentage;
+    }
 }
-
-
-function pause() external onlyOwner nonReentrant {
-    _pause();
-}
-
-function unpause() external onlyOwner nonReentrant {
-    _unpause();
-}
-
-function updateFeeAddresses(address _newRoyaltyAddress, address _newPlatformFeeAddress) external onlyOwner nonReentrant {
-    require(_newRoyaltyAddress != address(0) && _newPlatformFeeAddress != address(0), "Addresses cannot be zero");
-    require(_newRoyaltyAddress != msg.sender && _newPlatformFeeAddress != msg.sender, "Addresses cannot be the contract owner");
-    royaltyAddress = _newRoyaltyAddress;
-    platformFeeAddress = _newPlatformFeeAddress;
-}
-
-function updateFeePercentages(uint256 _newRoyaltyPercentage, uint256 _newPlatformFeePercentage) external onlyOwner nonReentrant {
-    royaltyPercentage = _newRoyaltyPercentage;
-    platformFeePercentage = _newPlatformFeePercentage;
-}}
