@@ -72,36 +72,41 @@ contract GotasNFTMarketplace is Ownable, ReentrancyGuard, Pausable {
         nextListingId++;
     }
 
-    function buyNFT(uint256 _listingId) external payable whenNotPaused nonReentrant {
-        require(msg.value > 0, "Sent value must be greater than zero.");
+//up v2
 
-        Listing storage listing = listings[_listingId];
-        require(listing.seller != address(0), "Listing does not exist.");
-        require(block.timestamp <= listing.deadline, "This listing has expired.");
-        require(msg.value == listing.price, "Sent value must be equal to the listing price.");
+function buyNFT(uint256 _listingId) external payable whenNotPaused nonReentrant {
+    require(msg.value > 0, "Sent value must be greater than zero.");
 
-        require(isWhitelisted[royaltyAddress], "Royalty address is not whitelisted");
-        require(isWhitelisted[platformFeeAddress], "Platform fee address is not whitelisted");
+    Listing storage listing = listings[_listingId];
+    require(listing.seller != address(0), "Listing does not exist.");
+    require(block.timestamp <= listing.deadline, "This listing has expired.");
+    require(msg.value == listing.price, "Sent value must be equal to the listing price.");
 
-        uint256 royaltyAmount = royaltyPercentage / 10000 * listing.price;
-        uint256 platformFee = platformFeePercentage / 10000 * listing.price;
-        uint256 sellerAmount = listing.price - royaltyAmount - platformFee;
+    require(isWhitelisted[royaltyAddress], "Royalty address is not whitelisted");
+    require(isWhitelisted[platformFeeAddress], "Platform fee address is not whitelisted");
 
-        address seller = listing.seller;
+    uint256 royaltyAmount = royaltyPercentage / 10000 * listing.price;
+    uint256 platformFee = platformFeePercentage / 10000 * listing.price;
+    uint256 sellerAmount = listing.price - royaltyAmount - platformFee;
 
-        IERC721 nftContract = IERC721(listing.nftContractAddress);
-        require(nftContract.ownerOf(listing.nftId) == seller, "Seller no longer owns the NFT.");
+    address seller = listing.seller;
 
-        nftContract.safeTransferFrom(seller, msg.sender, listing.nftId);
+    IERC721 nftContract = IERC721(listing.nftContractAddress);
+    require(nftContract.ownerOf(listing.nftId) == seller, "Seller no longer owns the NFT.");
 
-        payable(seller).transfer(sellerAmount);
-        payable(royaltyAddress).transfer(royaltyAmount);
-        payable(platformFeeAddress).transfer(platformFee);
+    // Checks finished, now do effects
+    delete listings[_listingId];
 
-        emit NFTSold(_listingId, listing.seller, msg.sender, listing.price);
+    // Now do interactions
+    nftContract.safeTransferFrom(seller, msg.sender, listing.nftId);
 
-        delete listings[_listingId];
-    }
+    payable(seller).transfer(sellerAmount);
+    payable(royaltyAddress).transfer(royaltyAmount);
+    payable(platformFeeAddress).transfer(platformFee);
+
+    emit NFTSold(_listingId, seller, msg.sender, listing.price);
+}
+
 
     function pause() external onlyOwner nonReentrant {
         _pause();
