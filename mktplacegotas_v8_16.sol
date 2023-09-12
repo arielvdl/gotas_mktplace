@@ -98,6 +98,7 @@ function unpause() external onlyOwner nonReentrant {
 
 function updateFeeAddresses(address _newRoyaltyAddress, address _newPlatformFeeAddress) external onlyOwner nonReentrant {
     require(_newRoyaltyAddress != address(0) && _newPlatformFeeAddress != address(0), "Addresses cannot be zero");
+    require(_newRoyaltyAddress != msg.sender && _newPlatformFeeAddress != msg.sender, "Addresses cannot be the contract owner");
     royaltyAddress = _newRoyaltyAddress;
     platformFeeAddress = _newPlatformFeeAddress;
 }
