@@ -26,7 +26,7 @@ contract GotasNFTMarketplace is Ownable, ReentrancyGuard, Pausable {
 
     uint256 public nextListingId = 1;
 
-    event NFTListed(uint256 indexed listingId, address indexed seller, address indexed nftContract, uint256 nftId, uint256 price, uint256 deadline);
+    event NFTListed(uint256 indexed listingId, address indexed seller, address indexed nftContractAddress, uint256 nftId, uint256 price, uint256 deadline);
     event NFTSold(uint256 indexed listingId, address indexed seller, address indexed buyer, uint256 price);
     event NFTDelisted(uint256 indexed listingId);
 
@@ -38,58 +38,57 @@ contract GotasNFTMarketplace is Ownable, ReentrancyGuard, Pausable {
         platformFeeAddress = _platformFeeAddress;
     }
 
-    function listNFT(address _nftContractAddress, uint256 _nftId, uint256 _price, uint256 _deadline) external whenNotPaused nonReentrant {
-        require(_price > 0, "Price must be greater than zero.");
-        require(_deadline > 0, "Deadline must be greater than zero.");
+    function listNFT(address nftContractAddress, uint256 nftId, uint256 price, uint256 deadline) external whenNotPaused nonReentrant {
+        require(price > 0, "Price must be greater than zero.");
+        require(deadline > 0, "Deadline must be greater than zero.");
 
-        IERC721 nftContract = IERC721(_nftContractAddress);
-        require(nftContract.ownerOf(_nftId) == msg.sender, "You must own the NFT to list it.");
+        IERC721 nftContract = IERC721(nftContractAddress);
+        require(nftContract.ownerOf(nftId) == msg.sender, "You must own the NFT to list it.");
 
         listings[nextListingId] = Listing({
-            nftContractAddress: _nftContractAddress,
-            nftId: _nftId,
+            nftContractAddress: nftContractAddress,
+            nftId: nftId,
             seller: msg.sender,
-            price: _price,
-            deadline: block.timestamp + _deadline
+            price: price,
+            deadline: block.timestamp + deadline
         });
 
         activeListingIds.push(nextListingId);
 
-        emit NFTListed(nextListingId, msg.sender, _nftContractAddress, _nftId, _price, block.timestamp + _deadline);
+        emit NFTListed(nextListingId, msg.sender, nftContractAddress, nftId, price, block.timestamp + deadline);
         nextListingId++;
     }
 
-    function buyNFT(uint256 _listingId) external payable whenNotPaused nonReentrant {
-    require(msg.value > 0, "Sent value must be greater than zero.");
+    function buyNFT(uint256 listingId) external payable whenNotPaused nonReentrant {
+        address seller;
 
-    Listing storage listing = listings[_listingId];
-    require(listing.seller != address(0), "Listing does not exist.");
-    require(block.timestamp <= listing.deadline, "This listing has expired.");
-    require(msg.value == listing.price, "Sent value must be equal to the listing price.");
+        require(msg.value > 0, "Sent value must be greater than zero.");
 
-    uint256 royaltyAmount = (listing.price * royaltyPercentage) / 10000;
-    uint256 platformFee = (listing.price * platformFeePercentage) / 10000;
-    uint256 sellerAmount = listing.price - royaltyAmount - platformFee;
+        Listing storage listing = listings[listingId];
+        require(listing.seller != address(0), "Listing does not exist.");
+        require(block.timestamp <= listing.deadline, "This listing has expired.");
+        require(msg.value == listing.price, "Sent value must be equal to the listing price.");
 
-    address seller = listing.seller;
+        uint256 royaltyAmount = (royaltyPercentage * listing.price) / 10000;
+        uint256 platformFee = (platformFeePercentage * listing.price) / 10000;
+        uint256 sellerAmount = listing.price - royaltyAmount - platformFee;
 
-    IERC721 nftContract = IERC721(listing.nftContractAddress);
-    require(nftContract.ownerOf(listing.nftId) == seller, "Seller no longer owns the NFT.");
+        seller = listing.seller;
 
-    // Remove the listing first to avoid re-entrancy
-    delete listings[_listingId];
+        IERC721 nftContract = IERC721(listing.nftContractAddress);
+        require(nftContract.ownerOf(listing.nftId) == seller, "Seller no longer owns the NFT.");
 
-    // Transferring the NFT
-    nftContract.safeTransferFrom(seller, msg.sender, listing.nftId);
+        // Check-Effects-Interactions pattern
+        delete listings[listingId];
+        
+        nftContract.safeTransferFrom(seller, msg.sender, listing.nftId);
 
-    // Distribute funds
-    payable(seller).transfer(sellerAmount);
-    payable(royaltyAddress).transfer(royaltyAmount);
-    payable(platformFeeAddress).transfer(platformFee);
+        payable(seller).transfer(sellerAmount);
+        payable(royaltyAddress).transfer(royaltyAmount);
+        payable(platformFeeAddress).transfer(platformFee);
 
-    emit NFTSold(_listingId, seller, msg.sender, listing.price);
-}
-
+        emit NFTSold(listingId, listing.seller, msg.sender, listing.price);
+    }
 
     function pause() external onlyOwner nonReentrant {
         _pause();
@@ -99,15 +98,15 @@ contract GotasNFTMarketplace is Ownable, ReentrancyGuard, Pausable {
         _unpause();
     }
 
-    function updateFeeAddresses(address _newRoyaltyAddress, address _newPlatformFeeAddress) external onlyOwner nonReentrant {
-        require(_newRoyaltyAddress != address(0) && _newPlatformFeeAddress != address(0), "Addresses cannot be zero");
-        require(_newRoyaltyAddress != msg.sender && _newPlatformFeeAddress != msg.sender, "Addresses cannot be the contract owner");
-        royaltyAddress = _newRoyaltyAddress;
-        platformFeeAddress = _newPlatformFeeAddress;
+    function updateFeeAddresses(address newRoyaltyAddress, address newPlatformFeeAddress) external onlyOwner nonReentrant {
+        require(newRoyaltyAddress != address(0) && newPlatformFeeAddress != address(0), "Addresses cannot be zero");
+        require(newRoyaltyAddress != msg.sender && newPlatformFeeAddress != msg.sender, "Addresses cannot be the contract owner");
+        royaltyAddress = newRoyaltyAddress;
+        platformFeeAddress = newPlatformFeeAddress;
     }
 
-    function updateFeePercentages(uint256 _newRoyaltyPercentage, uint256 _newPlatformFeePercentage) external onlyOwner nonReentrant {
-        royaltyPercentage = _newRoyaltyPercentage;
-        platformFeePercentage = _newPlatformFeePercentage;
+    function updateFeePercentages(uint256 newRoyaltyPercentage, uint256 newPlatformFeePercentage) external onlyOwner nonReentrant {
+        royaltyPercentage = newRoyaltyPercentage;
+        platformFeePercentage = newPlatformFeePercentage;
     }
 }
